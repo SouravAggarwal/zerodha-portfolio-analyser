@@ -7,105 +7,16 @@
 <script>
   // Set the theme before the page draws, so it never flashes
   document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') ||
-    localStorage.getItem('theme') ||
-    (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 </script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b4ee6'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif'%3E%E2%82%B9%3C/text%3E%3C/svg%3E" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-<div class="loading" id="loading">Loading your trades and daily prices…</div>
-
-<div class="app">
-  <aside>
-    <div class="brand">
-      <span>My Portfolio</span>
-      <button class="icon-btn" id="theme" title="Switch light / dark"></button>
-    </div>
-    <div class="totals" id="totals"></div>
-    <input class="search" id="search" placeholder="Search stock or ETF" />
-    <div class="list" id="list"></div>
-    <div class="sync">
-      <button class="btn primary" id="sync-btn">Sync trades</button>
-      <small id="synced"></small>
-    </div>
-  </aside>
-
-  <main id="main"></main>
+<div class="shell">
+  <nav class="rail" id="rail" aria-label="Menu"></nav>
+  <div class="body" id="body"><div class="loading">Loading your trades and daily prices…</div></div>
 </div>
-
-<template id="stock-view">
-  <div class="head">
-    <div><h1 data-f="symbol"></h1><div class="sub" data-f="name"></div>
-      <label class="cat-pick">Category <select data-f="cat"></select></label></div>
-    <div class="price"><b data-f="last"></b><div data-f="chg"></div></div>
-  </div>
-  <div class="stats" data-f="stats"></div>
-  <div class="notes" data-f="notes"></div>
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-head">
-      <b>Daily price</b>
-      <div class="legend">
-        <span><i style="background:var(--up)"></i>Buy</span>
-        <span><i style="background:var(--down)"></i>Sell</span>
-        <span class="sizes"><i style="width:6px;height:6px"></i><i style="width:10px;height:10px"></i><i style="width:14px;height:14px"></i> = quantity</span>
-      </div>
-    </div>
-    <div id="chart"></div>
-  </div>
-  <div class="card">
-    <div class="card-head"><b>Buy / sell orders</b><span class="muted" data-f="count"></span></div>
-    <div class="table-wrap">
-      <table class="trades" id="table">
-        <thead><tr><th>Date</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </div>
-</template>
-
-<div class="modal" id="sync" hidden>
-  <div class="back" data-close></div>
-  <div class="box">
-    <div class="top"><b>Sync new trades</b><button class="x" data-close aria-label="Close">×</button></div>
-    <ol class="steps">
-      <li>Open <a href="https://console.zerodha.com/reports/tradebook" target="_blank" rel="noopener">Kite Console → Reports → Tradebook</a></li>
-      <li>Segment: <b>Equity</b>. <span id="sync-range"></span></li>
-      <li>Click <b>View</b> (the → button), then <b>Download: CSV</b> at the top right of the list</li>
-      <li><i>Recommended:</i> also download your holdings from <a href="https://console.zerodha.com/portfolio/holdings" target="_blank" rel="noopener">Console → Portfolio → Holdings</a>. It adds shares that never were trades (IPO, bonus, demerger, gold bonds).</li>
-      <li>Drop all the files below</li>
-    </ol>
-    <label class="drop" id="drop">
-      <input type="file" id="file" accept=".csv,.xlsx" multiple hidden />
-      <span>Drop tradebook CSV and holdings files here, or click to pick them</span>
-    </label>
-    <div class="result" id="result" hidden></div>
-    <div class="foot">Only trades that are not saved yet are added. Overlapping dates, the same file twice, or CSV and Excel together are all fine. Your trades stay on this computer, in <code>data/trades.csv</code>.</div>
-  </div>
-</div>
-
-<div class="modal" id="cats" hidden>
-  <div class="back" data-close></div>
-  <div class="box wide">
-    <div class="top"><b>Edit categories</b><button class="x" data-close aria-label="Close">×</button></div>
-    <p class="muted">Make your own groups, like Gold, Silver, ETFs or Stocks, and put each holding in one. Each category gets its own page with combined invested amount, value and P&amp;L.</p>
-    <div class="cat-cols">
-      <div>
-        <div class="group">Your categories</div>
-        <div id="cat-names"></div>
-        <div class="cat-add"><input id="cat-new" placeholder="New category name" maxlength="40" /><button class="btn" id="cat-add">Add</button></div>
-      </div>
-      <div>
-        <div class="group">Which holding goes where</div>
-        <div id="cat-holdings" class="cat-holdings"></div>
-      </div>
-    </div>
-    <div class="cat-foot">
-      <button class="link" id="cat-reset" title="Go back to the groups made from what each holding is">Start over with automatic groups</button>
-      <span><button class="btn" data-close>Cancel</button> <button class="btn primary" id="cat-save">Save</button></span>
-    </div>
-  </div>
-</div>
-
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script src="app.js"></script>
 </body>

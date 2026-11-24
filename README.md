@@ -12,8 +12,8 @@ Drop in your tradebook → get a clean view of each stock and ETF you own.
 ![Runs locally](https://img.shields.io/badge/your%20data-stays%20on%20your%20computer-2563eb)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
-<img src="docs/screenshot-overview.png" alt="Overview with categories" width="49%"/> <img src="docs/screenshot-light.png" alt="One stock with its trades" width="49%"/>
-<img src="docs/screenshot-category.png" alt="A category over time" width="49%"/> <img src="docs/screenshot-dark.png" alt="Dark theme" width="49%"/>
+<img src="docs/screenshot-overview.png" alt="Home page" width="49%"/> <img src="docs/screenshot-light.png" alt="One stock with its trades" width="49%"/>
+<img src="docs/screenshot-category.png" alt="All categories" width="49%"/> <img src="docs/screenshot-dark.png" alt="Dark theme" width="49%"/>
 
 <sub>Screenshots use made-up sample trades.</sub>
 
@@ -23,10 +23,15 @@ Drop in your tradebook → get a clean view of each stock and ETF you own.
 
 ## ✨ What you get
 
-- **Overview page** — invested, current value, profit or loss, and profit booked on sales, all in one place.
+- **Four pages, one menu on the left** (a bar at the bottom on a phone):
+  - **Home** — the whole summary: value, profit or loss, profit booked on sales, yearly return vs the Nifty 50, value over time, your categories, best and worst holdings, sectors.
+  - **Holdings** — a searchable list grouped by category. The first item, **All holdings**, shows one table of everything you hold and everything you sold.
+  - **Categories** — your groups. The first item, **All categories**, compares them in one chart and table.
+  - **Sync** — add new files from Kite.
+- Every page has its own link (like `#/holdings/INFY`), so the browser Back button and bookmarks work.
 - **Yearly return (XIRR)** for the whole portfolio, each category and each stock. XIRR is your gain as a yearly rate, counting *when* each rupee went in or came out.
 - **You vs the Nifty 50** — what the same money, put in and taken out on the same days, would have made in the Nifty 50 index.
-- **Your own categories** — make groups like *Gold*, *Silver*, *ETFs* or *Stocks* and put each holding in one. Each category gets a page with its combined invested amount, value and P&L, and a chart of its value over time. Until you make your own, holdings are grouped for you (stocks, gold, silver, liquid, other ETFs).
+- **Your own categories** — make groups like *Gold*, *Silver*, *ETFs* or *Stocks* and put each holding in one: click **Edit** on the Categories page, or pick from the **Category** box on a holding's page. Each category gets a page with its combined invested amount, value and P&L, and a chart of its value over time. Until you make your own, holdings are grouped for you (stocks, gold, silver, liquid, other ETFs).
 - **Stocks by sector**, **best and worst holdings**, and **profit booked in each financial year**.
 - **One page per stock or ETF** — quantity, average buy price, invested, current value, profit or loss.
 - **Daily price chart with your trades on it** — 🟢 green dots are buys, 🔴 red dots are sells. **Bigger dot = more shares.**
@@ -56,7 +61,7 @@ cd zerodha-portfolio-analyser
 python3 app.py
 ```
 
-Your browser opens at **http://localhost:8000**. Click **Sync trades** to add your first file.
+Your browser opens at **http://localhost:8000**. Open **Sync** in the left menu to add your first file.
 
 ## 📥 Which file to download from Kite
 
@@ -66,7 +71,7 @@ Your browser opens at **http://localhost:8000**. Click **Sync trades** to add yo
 4. Click **View** (the → button), then **Download: CSV** at the top right of the list.
 
 **First time:** download one file per financial year, all the way back to your first trade. You can drop all the files in together.<br/>
-**After that:** the Sync window shows the date of your last saved trade. Download from that day to today.
+**After that:** the Sync page shows the date of your last saved trade. Download from that day to today.
 
 **Recommended — the holdings file:** in **[Console → Portfolio → Holdings](https://console.zerodha.com/portfolio/holdings)**, download your holdings and drop it in Sync too (`.xlsx` or `.csv`). It fills in shares the tradebook can't know about, and gives prices for gold bonds. Add a fresh one now and then.
 
@@ -121,7 +126,7 @@ Find the new name by searching the company on [finance.yahoo.com](https://financ
 <details>
 <summary><b>It says "some buys are missing"</b></summary>
 
-You sold more shares than the tradebook shows you bought. This happens with **IPO shares**, **gifts**, **shares moved in from another broker**, or a **demerger**, because those are not trades. Add your Kite holdings file in Sync and the numbers are fixed.
+You sold more shares than the tradebook shows you bought. This happens with **IPO shares**, **gifts**, **shares moved in from another broker**, or a **demerger**, because those are not trades. Add your Kite holdings file on the Sync page and the numbers are fixed.
 </details>
 
 <details>
