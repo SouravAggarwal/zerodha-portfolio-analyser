@@ -28,11 +28,13 @@ Drop in your tradebook → get a clean view of each stock and ETF you own.
 - **Zoom and drag** the chart to look at any time period.
 - **Sync in one step** — download your tradebook from Kite, drop it in. Only new trades are added. Drop the same file twice and nothing is added twice.
 - **Light and dark theme** — one click, and it remembers your choice.
+- **Numbers that match Kite** — average price uses *first in, first out*, the same method as Kite. Add your Kite holdings file and every quantity and average price lines up with Console.
 - **Handles the tricky bits**
   - An order filled in several parts is shown as **one** order.
+  - **Renamed stocks** are followed by their ISIN (the share's fixed ID), so old and new names stay together.
   - **Splits and bonus shares** are found automatically, so old orders match today's share count.
+  - Shares that never were trades — **IPO, demerger, gold bonds, shares moved in** — come from the holdings file, with a note that says so.
   - Sold-out stocks stay in a **Sold** list, with the profit or loss you booked.
-  - If a stock was renamed or something is missing, the app tells you in plain words.
 
 ## 🚀 Start in 30 seconds
 
@@ -56,13 +58,17 @@ Your browser opens at **http://localhost:8000**. Click **Sync trades** to add yo
 **First time:** download one file per financial year, all the way back to your first trade. You can drop all the files in together.<br/>
 **After that:** the Sync window shows the date of your last saved trade. Download from that day to today.
 
+**Recommended — the holdings file:** in **[Console → Portfolio → Holdings](https://console.zerodha.com/portfolio/holdings)**, download your holdings and drop it in Sync too (`.xlsx` or `.csv`). It fills in shares the tradebook can't know about, and gives prices for gold bonds. Add a fresh one now and then.
+
 > F&O, currency and commodity rows are skipped. This app is for stocks and ETFs.
 
 ## 🧠 How it works
 
 ```mermaid
 flowchart LR
-    A[Tradebook CSV<br/>from Kite Console] -->|Sync trades| B[data/trades.csv<br/>on your computer]
+    A[Tradebook CSV<br/>from Kite Console] -->|Sync| B[data/trades.csv<br/>on your computer]
+    H[Holdings file<br/>from Kite Console] -->|Sync| G[data/holdings.json]
+    G --> E
     C[Yahoo Finance<br/>daily prices, free] -->|once a day| D[data/prices/]
     B --> E[app.py<br/>small local server]
     D --> E
@@ -71,12 +77,14 @@ flowchart LR
 
 - **Trades** are kept in `data/trades.csv`. Each trade is matched by its trade ID, so repeats are skipped.
 - **Prices** are daily closing prices from Yahoo Finance. They are saved in `data/prices/` and refreshed once a day.
-- **Profit or loss** uses the average-cost method. When you sell, the cost of those shares is your average buy price at that time.
+- **Profit or loss** uses *first in, first out*, like Kite: when you sell, the oldest shares you bought are sold first.
+- **Holdings file:** on the day of the file, the app takes Kite's quantity and average price as the truth. Trades after that day are added on top.
+- **Renamed stocks** are found on Yahoo by their ISIN. Gold bonds are not on Yahoo, so their price comes from your holdings file.
 
 ## 🔒 Privacy
 
 - Everything runs on **your own computer**. There is no account, no cloud and no tracking.
-- Your trades are never sent anywhere. The only thing the app asks the internet for is **daily prices by stock name** (for example `INFY.NS`), and the chart library.
+- Your trades are never sent anywhere. The only things the app asks the internet for are **daily prices by stock name or ISIN** (for example `INFY.NS`) from Yahoo Finance, and the chart library.
 - The `data/` folder is in `.gitignore`, so your trades are never committed by mistake.
 - The app never logs in to Kite. You download the file yourself.
 
@@ -85,7 +93,7 @@ flowchart LR
 <details>
 <summary><b>A stock says "No daily prices found"</b></summary>
 
-The stock was probably renamed or delisted, so Yahoo knows it by a new name. Create `data/tickers.json` and map the old name to the new Yahoo name:
+The app already looks the stock up by its ISIN, which finds most renamed stocks. If it still finds nothing, create `data/tickers.json` and map the name (or the ISIN) to the Yahoo name:
 
 ```json
 { "OLDNAME": "NEWNAME.NS" }
@@ -97,7 +105,7 @@ Find the new name by searching the company on [finance.yahoo.com](https://financ
 <details>
 <summary><b>It says "some buys are missing"</b></summary>
 
-You sold more shares than the tradebook shows you bought. This happens with **IPO shares**, **gifts**, **shares moved in from another broker**, or a **demerger**, because those are not trades. The chart still works. Only the profit or loss for that stock may be off.
+You sold more shares than the tradebook shows you bought. This happens with **IPO shares**, **gifts**, **shares moved in from another broker**, or a **demerger**, because those are not trades. Add your Kite holdings file in Sync and the numbers are fixed.
 </details>
 
 <details>
@@ -119,7 +127,7 @@ PORT=9000 python3 app.py
 ```
 app.py          the local server: reads tradebooks, gets prices, works out holdings
 web/            the page: index.html, app.js, style.css (charts by Apache ECharts)
-data/           your trades and cached prices (created on first sync, never committed)
+data/           your trades, holdings file and cached prices (created on first sync, never committed)
 docs/           screenshots
 ```
 

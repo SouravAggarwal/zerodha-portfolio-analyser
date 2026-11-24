@@ -69,12 +69,13 @@
     <ol class="steps">
       <li>Open <a href="https://console.zerodha.com/reports/tradebook" target="_blank" rel="noopener">Kite Console → Reports → Tradebook</a></li>
       <li>Segment: <b>Equity</b>. <span id="sync-range"></span></li>
-      <li>Click <b>Download: CSV</b> (top right of the list)</li>
-      <li>Drop the file (or several files) below</li>
+      <li>Click <b>View</b> (the → button), then <b>Download: CSV</b> at the top right of the list</li>
+      <li><i>Recommended:</i> also download your holdings from <a href="https://console.zerodha.com/portfolio/holdings" target="_blank" rel="noopener">Console → Portfolio → Holdings</a>. It adds shares that never were trades (IPO, bonus, demerger, gold bonds).</li>
+      <li>Drop all the files below</li>
     </ol>
     <label class="drop" id="drop">
-      <input type="file" id="file" accept=".csv" multiple hidden />
-      <span>Drop tradebook CSV files here, or click to pick them</span>
+      <input type="file" id="file" accept=".csv,.xlsx" multiple hidden />
+      <span>Drop tradebook CSV and holdings files here, or click to pick them</span>
     </label>
     <div class="result" id="result" hidden></div>
     <div class="foot">Only trades that are not saved yet are added (matched by trade ID). Your trades stay on this computer, in <code>data/trades.csv</code>.</div>
