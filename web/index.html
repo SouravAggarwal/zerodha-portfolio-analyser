@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Portfolio</title>
+<script>
+  // Set the theme before the page draws, so it never flashes
+  document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') ||
+    localStorage.getItem('theme') ||
+    (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+</script>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="loading" id="loading">Loading your trades and daily prices…</div>
+
+<div class="app">
+  <aside>
+    <div class="brand">
+      <span>My Portfolio</span>
+      <button class="icon-btn" id="theme" title="Switch light / dark"></button>
+    </div>
+    <div class="totals" id="totals"></div>
+    <input class="search" id="search" placeholder="Search stock or ETF" />
+    <div class="list" id="list"></div>
+    <div class="sync">
+      <button class="btn primary" id="sync-btn">Sync trades</button>
+      <small id="synced"></small>
+    </div>
+  </aside>
+
+  <main id="main"></main>
+</div>
+
+<template id="stock-view">
+  <div class="head">
+    <div><h1 data-f="symbol"></h1><div class="sub" data-f="name"></div></div>
+    <div class="price"><b data-f="last"></b><div data-f="chg"></div></div>
+  </div>
+  <div class="stats" data-f="stats"></div>
+  <div class="notes" data-f="notes"></div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-head">
+      <b>Daily price</b>
+      <div class="legend">
+        <span><i style="background:var(--up)"></i>Buy</span>
+        <span><i style="background:var(--down)"></i>Sell</span>
+        <span class="sizes"><i style="width:6px;height:6px"></i><i style="width:10px;height:10px"></i><i style="width:14px;height:14px"></i> = quantity</span>
+      </div>
+    </div>
+    <div id="chart"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><b>Buy / sell orders</b><span class="muted" data-f="count"></span></div>
+    <div class="table-wrap">
+      <table class="trades" id="table">
+        <thead><tr><th>Date</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</template>
+
+<div class="modal" id="sync" hidden>
+  <div class="back" data-close></div>
+  <div class="box">
+    <div class="top"><b>Sync new trades</b><button class="x" data-close aria-label="Close">×</button></div>
+    <ol class="steps">
+      <li>Open <a href="https://console.zerodha.com/reports/tradebook" target="_blank" rel="noopener">Kite Console → Reports → Tradebook</a></li>
+      <li>Segment: <b>Equity</b>. <span id="sync-range"></span></li>
+      <li>Click <b>Download: CSV</b> (top right of the list)</li>
+      <li>Drop the file (or several files) below</li>
+    </ol>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".csv" multiple hidden />
+      <span>Drop tradebook CSV files here, or click to pick them</span>
+    </label>
+    <div class="result" id="result" hidden></div>
+    <div class="foot">Only trades that are not saved yet are added (matched by trade ID). Your trades stay on this computer, in <code>data/trades.csv</code>.</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

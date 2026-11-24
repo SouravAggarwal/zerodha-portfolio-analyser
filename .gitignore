@@ -1,0 +1,10 @@
+# Your own trades and cached prices. Never commit these.
+data/
+
+# Local tools and early design mockups
+.claude/
+design-samples/
+
+__pycache__/
+*.pyc
+.DS_Store
