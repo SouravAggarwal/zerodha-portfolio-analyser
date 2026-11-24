@@ -35,7 +35,8 @@
 
 <template id="stock-view">
   <div class="head">
-    <div><h1 data-f="symbol"></h1><div class="sub" data-f="name"></div></div>
+    <div><h1 data-f="symbol"></h1><div class="sub" data-f="name"></div>
+      <label class="cat-pick">Category <select data-f="cat"></select></label></div>
     <div class="price"><b data-f="last"></b><div data-f="chg"></div></div>
   </div>
   <div class="stats" data-f="stats"></div>
@@ -78,7 +79,30 @@
       <span>Drop tradebook CSV and holdings files here, or click to pick them</span>
     </label>
     <div class="result" id="result" hidden></div>
-    <div class="foot">Only trades that are not saved yet are added (matched by trade ID). Your trades stay on this computer, in <code>data/trades.csv</code>.</div>
+    <div class="foot">Only trades that are not saved yet are added. Overlapping dates, the same file twice, or CSV and Excel together are all fine. Your trades stay on this computer, in <code>data/trades.csv</code>.</div>
+  </div>
+</div>
+
+<div class="modal" id="cats" hidden>
+  <div class="back" data-close></div>
+  <div class="box wide">
+    <div class="top"><b>Edit categories</b><button class="x" data-close aria-label="Close">×</button></div>
+    <p class="muted">Make your own groups, like Gold, Silver, ETFs or Stocks, and put each holding in one. Each category gets its own page with combined invested amount, value and P&amp;L.</p>
+    <div class="cat-cols">
+      <div>
+        <div class="group">Your categories</div>
+        <div id="cat-names"></div>
+        <div class="cat-add"><input id="cat-new" placeholder="New category name" maxlength="40" /><button class="btn" id="cat-add">Add</button></div>
+      </div>
+      <div>
+        <div class="group">Which holding goes where</div>
+        <div id="cat-holdings" class="cat-holdings"></div>
+      </div>
+    </div>
+    <div class="cat-foot">
+      <button class="link" id="cat-reset" title="Go back to the groups made from what each holding is">Start over with automatic groups</button>
+      <span><button class="btn" data-close>Cancel</button> <button class="btn primary" id="cat-save">Save</button></span>
+    </div>
   </div>
 </div>
 

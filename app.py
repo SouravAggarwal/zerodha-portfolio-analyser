@@ -25,6 +25,7 @@ import urllib.request
 import webbrowser
 import xml.etree.ElementTree as ET
 import zipfile
+from bisect import bisect_right
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,7 +38,8 @@ PRICES = DATA / "prices"
 TRADES = DATA / "trades.csv"
 HOLDINGS = DATA / "holdings.json"
 META = DATA / "meta.json"
-TICKERS = DATA / "tickers.json"  # optional: {"KITE_SYMBOL or ISIN": "YAHOO.TICKER"}
+TICKERS = DATA / "tickers.json"
+CATEGORIES = DATA / "categories.json"  # your own groups, like Gold or Stocks, and which holding is in which  # optional: {"KITE_SYMBOL or ISIN": "YAHOO.TICKER"}
 PORT = int(os.environ.get("PORT", "8000"))
 EPS = 1e-6
 
@@ -90,6 +92,18 @@ def parse_date(s):
         except ValueError:
             pass
     raise ValueError("unknown date: " + s)
+
+
+def norm_id(s):
+    """A trade or order ID as text. Undoes what Excel does to long numbers, or stops if it can't."""
+    s = str(s or "").strip().lstrip("'")
+    if re.fullmatch(r"\d+\.0*", s):  # 71500.0 -> 71500
+        s = s.split(".")[0]
+    if re.fullmatch(r"\d(\.\d+)?[eE]\+?\d+", s):
+        raise ValueError("The trade IDs in this file were cut short by Excel (they look like " + s
+                         + "). Please download the file again from Kite and add it without opening "
+                         "and saving it in Excel.")
+    return s
 
 
 def num(s):
@@ -176,6 +190,10 @@ def parse_tradebook(rows):
             trade_date=parse_date(t["trade_date"]), trade_type=typ,
             quantity="%g" % num(t["quantity"]), price="%g" % num(t["price"]),
         )
+        t["trade_id"], t["order_id"] = norm_id(t["trade_id"]), norm_id(t["order_id"])
+        if not t["trade_id"]:
+            raise ValueError("A row has no trade ID, so repeats can't be found. Please download "
+                             "the tradebook again from Kite.")
         t["order_id"] = t["order_id"] or t["trade_id"]
         trades.append(t)
     return trades, skipped
@@ -225,8 +243,15 @@ def classify(f):
 # ---------- saved data ----------
 
 def trade_key(t):
-    # ISIN, not the name: a renamed stock keeps its ISIN, so a re-downloaded file can't add it twice
-    return (t.get("isin") or t["symbol"], t["exchange"], t["trade_id"], t["order_id"])
+    """What makes a trade one of a kind. The same trade in two files (overlapping dates,
+    the same file twice, CSV and Excel) gets the same key, so it is saved once.
+    An exchange never gives two orders the same order ID, and a trade ID is one fill of
+    that order. The name and the date are left out on purpose: a stock can be renamed,
+    and Excel can rewrite a date."""
+    tid, oid = norm_id(t["trade_id"]), norm_id(t["order_id"])
+    if oid and oid != tid:
+        return (t["exchange"].upper(), oid, tid)
+    return (t["exchange"].upper(), oid or tid, tid, t["trade_date"], t.get("isin") or t["symbol"])
 
 
 def load_trades():
@@ -255,9 +280,9 @@ def sync(files, commit):
 def _sync(files, commit):
     saved = load_trades()
     keys = {trade_key(t) for t in saved}
-    report = {"files": [], "new": 0, "already": 0, "skipped": 0, "symbols": [],
+    report = {"files": [], "new": 0, "already": 0, "repeated": 0, "skipped": 0, "symbols": [],
               "from": None, "to": None, "holdings": None}
-    new, snapshot = [], None
+    new, snapshot, batch = [], None, set()
     for f in files:
         try:
             got = classify(f)
@@ -279,7 +304,10 @@ def _sync(files, commit):
             if k in keys:
                 report["already"] += 1
                 continue
-            keys.add(k)
+            if k in batch:  # in two of the files dropped now (overlapping dates, same file twice)
+                report["repeated"] += 1
+                continue
+            batch.add(k)
             new.append(t)
             report["from"] = min(report["from"] or t["trade_date"], t["trade_date"])
             report["to"] = max(report["to"] or t["trade_date"], t["trade_date"])
@@ -351,7 +379,7 @@ def search_by_isin(isin):
     return out
 
 
-def get_prices(symbol, isin, first_date):
+def get_prices(symbol, isin, first_date, ticker=None):
     path = PRICES / (re.sub(r"[^A-Za-z0-9_.&-]", "_", symbol) + ".json")
     today = date.today().isoformat()
     start = (date.fromisoformat(first_date) - timedelta(days=30)).isoformat()
@@ -359,7 +387,7 @@ def get_prices(symbol, isin, first_date):
     if cached and cached.get("fetched") == today and cached.get("start", "9") <= start:
         return cached
     overrides = read_json(TICKERS, {})
-    forced = overrides.get(symbol) or overrides.get(isin)
+    forced = ticker or overrides.get(symbol) or overrides.get(isin)
     offline = False  # True when Yahoo could not be reached at all (no internet, timeout)
 
     def attempt(tickers, tried):
@@ -406,6 +434,53 @@ def get_prices(symbol, isin, first_date):
     return data
 
 
+# ---------- returns ----------
+
+def xirr(flows):
+    """Yearly return of dated cash flows [(YYYY-MM-DD, amount)]: money in is minus, money out is plus.
+    The same idea as XIRR in Excel. None when it can't be worked out."""
+    flows = [(date.fromisoformat(d), a) for d, a in flows if abs(a) > 0.005]
+    if not flows or not any(a > 0 for _, a in flows) or not any(a < 0 for _, a in flows):
+        return None
+    d0 = min(d for d, _ in flows)
+    ts = [((d - d0).days / 365.0, a) for d, a in flows]
+
+    def npv(r):
+        return sum(a / (1 + r) ** t for t, a in ts)
+
+    lo, hi = -0.9999, 1.0
+    while npv(hi) > 0 and hi < 1e6:  # make the range wide enough for big gains
+        hi *= 4
+    f_lo, f_hi = npv(lo), npv(hi)
+    if f_lo * f_hi > 0:
+        return None
+    for _ in range(200):  # halve the range until it is tiny (slow but never fails)
+        mid = (lo + hi) / 2
+        f_mid = npv(mid)
+        if (f_mid > 0) == (f_lo > 0):
+            lo, f_lo = mid, f_mid
+        else:
+            hi = mid
+        if hi - lo < 1e-7:
+            break
+    return (lo + hi) / 2
+
+
+def span_days(flows):
+    ds = [d for d, a in flows if abs(a) > 0.005]
+    return (date.fromisoformat(max(ds)) - date.fromisoformat(min(ds))).days if ds else 0
+
+
+def fin_year(day):
+    """Indian financial year (April to March) of a YYYY-MM-DD date, like '2025-26'."""
+    y, m = int(day[:4]), int(day[5:7])
+    y = y if m >= 4 else y - 1
+    return "%d-%02d" % (y, (y + 1) % 100)
+
+
+MIN_XIRR_DAYS = 90  # a yearly return from a few weeks of history is too jumpy to mean much
+
+
 # ---------- portfolio ----------
 
 def split_factor(splits, day):
@@ -441,23 +516,35 @@ def build_holding(key, isin, symbol, trades, px, snap_item, snap_date):
         o["price"] = o["value"] / o["qty"] if o["qty"] else 0.0
 
     # First in, first out (the same method Kite uses for the average price)
-    lots, realised, missing = [], 0.0, False
+    lots, realised, missing, booked = [], 0.0, False, {}
+    # Money in (buys, minus) and out (sells, plus) by date, for the yearly return
+    flows = [(o["date"], o["value"] if o["type"] == "SELL" else -o["value"]) for o in orders]
+    outside = 0.0  # cost of shares that came or went without a trade (IPO, demerger, moved in…)
+
+    steps = []  # [date, shares held, money in them] after each change, to draw value over time
+
+    def mark(day):
+        steps.append([day, round(held(), 6), round(cost(), 2)])
 
     def run(o):
         nonlocal realised, missing
         if o["type"] == "BUY":
             lots.append([o["qty"], o["price"]])
+            mark(o["date"])
             return
-        left = o["qty"]
+        left, gain = o["qty"], 0.0
         while left > EPS and lots:
             take = min(left, lots[0][0])
-            realised += (o["price"] - lots[0][1]) * take
+            gain += (o["price"] - lots[0][1]) * take
             lots[0][0] -= take
             left -= take
             if lots[0][0] <= EPS:
                 lots.pop(0)
+        realised += gain
+        booked[fin_year(o["date"])] = booked.get(fin_year(o["date"]), 0.0) + gain
         if left > EPS:
             missing = True  # sold more than the trades show was bought
+        mark(o["date"])
 
     def held():
         return sum(q for q, _ in lots)
@@ -471,6 +558,7 @@ def build_holding(key, isin, symbol, trades, px, snap_item, snap_date):
             if o["date"] < snap_date:  # the holdings file doesn't include that day's trades yet
                 run(o)
         trade_qty, trade_avg = held(), (cost() / held() if held() > EPS else 0.0)
+        cost_before = cost()
         f = split_factor(splits, snap_date)  # a split after the holdings file date
         k_qty = snap_item["qty"] * f if snap_item else 0.0
         k_avg = snap_item["avg"] / f if snap_item else 0.0
@@ -495,6 +583,10 @@ def build_holding(key, isin, symbol, trades, px, snap_item, snap_date):
             recon = {"date": snap_date, "kiteQty": k_qty, "tradeQty": trade_qty,
                      "kiteAvg": k_avg, "tradeAvg": trade_avg, "costChanged": cost_changed}
         missing = False  # the holdings file settles the count
+        outside = cost() - cost_before
+        mark(snap_date)
+        if abs(outside) > 0.005:  # counted as if put in (or taken out) on the holdings file date
+            flows.append((snap_date, -outside))
         for o in orders:
             if o["date"] >= snap_date:
                 run(o)
@@ -507,6 +599,7 @@ def build_holding(key, isin, symbol, trades, px, snap_item, snap_date):
             lots[-1][0] -= frac
             if lots[-1][0] <= EPS:
                 lots.pop()
+            mark(orders[-1]["date"])
 
     qty = held() if held() > EPS else 0.0
     invested = cost() if qty else 0.0
@@ -520,6 +613,9 @@ def build_holding(key, isin, symbol, trades, px, snap_item, snap_date):
     else:
         last = prev = None
     current = qty * last if last is not None else invested
+    end = [(date.today().isoformat(), current)] if qty else []  # as if sold today
+    days = span_days(flows + end)
+    rate = xirr(flows + end) if days >= MIN_XIRR_DAYS else None
     name = px.get("name") or symbol
     sector = (snap_item or {}).get("sector", "")
     is_etf = (px.get("type") == "ETF" or sector == "ETF" or "ETF" in name.upper()
@@ -535,6 +631,8 @@ def build_holding(key, isin, symbol, trades, px, snap_item, snap_date):
         "pnlPct": (current - invested) / invested if invested else 0.0, "realised": realised,
         "last": last, "lastDate": last_date, "priceFrom": price_from,
         "dayChange": (last - prev) / prev if last is not None and prev else 0.0,
+        "xirr": rate, "xirrDays": days, "outsideCost": outside, "booked": booked, "flows": flows,
+        "steps": steps,
         "missingBuys": missing, "recon": recon, "priceError": px.get("error"), "splits": splits,
         "symbols": sorted({o["symbol"] for o in orders}),
         "orders": orders, "prices": prices,
@@ -571,14 +669,111 @@ def portfolio():
     holdings = [build_holding(k, isin_of(k), symbol_of(k), groups.get(k, []), pxs[k], snap_items.get(k),
                               snap["date"] if snap else None) for k in keys]
     holdings.sort(key=lambda h: (-h["current"], h["symbol"]))
+    insights = make_insights(holdings, min((first_date(k) for k in keys), default=None))
+    for h in holdings:
+        h["autoCategory"] = asset_class(h)  # used until you put it in a category yourself
     meta = read_json(META, {})
     return {
         "holdings": holdings,
+        "insights": insights,
+        "categories": read_json(CATEGORIES, None),
         "tradeCount": len(trades),
         "lastSynced": meta.get("lastSynced"),
         "lastTradeDate": max((t["trade_date"] for t in trades), default=None),
         "holdingsDate": snap["date"] if snap else None,
     }
+
+
+def asset_class(h):
+    """A plain group for a holding: what kind of thing the money is in."""
+    text = (h["symbol"] + " " + h["name"]).upper()
+    if h["kind"] == "Stock":
+        return "Stocks"
+    if h["kind"] == "Gold bond" or "GOLD" in text:
+        return "Gold"
+    if "SILV" in text:
+        return "Silver"
+    if "LIQUID" in text or "MONEY MARKET" in text or "OVERNIGHT" in text:
+        return "Liquid"
+    return "Other ETFs"
+
+
+def nice_sector(s):
+    """'FINANCIAL SERVICES' -> 'Financial Services', but 'FMCG' and 'IT' stay as they are."""
+    if not s:
+        return "Not known"
+    return " ".join(w if w in ("FMCG", "IT", "PSU", "NBFC", "&") else w.capitalize() for w in s.split())
+
+
+def split(items):
+    """[(name, value)] -> [{name, value, share}] largest first, names merged."""
+    total, out = sum(v for _, v in items), {}
+    for n, v in items:
+        out[n] = out.get(n, 0.0) + v
+    return [{"name": n, "value": v, "share": v / total if total else 0.0}
+            for n, v in sorted(out.items(), key=lambda x: -x[1])]
+
+
+def bench_close(closes, day):
+    """Nifty close on that day, or the last trading day before it."""
+    i = bisect_right(closes, (day, float("inf"))) - 1
+    return closes[max(i, 0)][1] if closes else None
+
+
+def make_insights(holdings, first):
+    held = [h for h in holdings if h["qty"] > 0]
+    today = date.today().isoformat()
+    paid = [f for h in holdings for f in h["flows"]]  # every buy, sell and outside share
+    flows = paid + [(today, sum(h["current"] for h in held))]  # plus everything as if sold today
+    days = span_days(flows)
+    booked = {}
+    for h in holdings:
+        for fy, v in h["booked"].items():
+            booked[fy] = booked.get(fy, 0.0) + v
+
+    # Nifty 50: the same money on the same days, put in (or taken out of) the index instead
+    nifty = {"xirr": None, "value": None, "error": None}
+    if first and flows:
+        px = get_prices("NIFTY50", "", first, ticker="^NSEI")
+        closes = [tuple(p) for p in px.get("prices", [])]
+        if closes:
+            units = 0.0
+            for d, a in paid:
+                units -= a / bench_close(closes, d)  # buy index units with money in, sell with money out
+            value = units * closes[-1][1]
+            nifty["value"] = value
+            nifty["xirr"] = xirr(paid + [(today, value)]) if days >= MIN_XIRR_DAYS else None
+        else:
+            nifty["error"] = px.get("error") or "no prices"
+    return {
+        "xirr": xirr(flows) if days >= MIN_XIRR_DAYS else None,
+        "xirrDays": days,
+        "nifty": nifty,
+        "booked": sum(booked.values()),
+        "bookedByYear": [{"year": fy, "value": v} for fy, v in sorted(booked.items())],
+        "sectors": split([(nice_sector(h["sector"]), h["current"])
+                          for h in held if h["kind"] == "Stock"]),
+        "outside": sum(1 for h in holdings if abs(h["outsideCost"]) > 0.005),
+    }
+
+
+def save_categories(body):
+    """Save your categories: {"names": [...], "assign": {holding key: name}}."""
+    names = body.get("names")
+    assign = body.get("assign")
+    if not isinstance(names, list) or not isinstance(assign, dict):
+        raise ValueError("Send names (a list) and assign (holding -> category name).")
+    clean = []
+    for n in names:
+        n = str(n).strip()[:40]
+        if n and n not in clean:
+            clean.append(n)
+    if len(clean) > 50:
+        raise ValueError("Up to 50 categories.")
+    assign = {str(k)[:40]: str(v) for k, v in assign.items() if str(v) in clean}
+    with lock:
+        write_atomic(CATEGORIES, json.dumps({"names": clean, "assign": assign}, indent=1))
+    return {"names": clean, "assign": assign}
 
 
 # ---------- web server ----------
@@ -626,13 +821,15 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if not self.host_ok() or not (self.headers.get("Content-Type") or "").startswith("application/json"):
             return self.send(403, {"error": "Forbidden"})
-        if path not in ("/api/sync/preview", "/api/sync/commit"):
+        if path not in ("/api/sync/preview", "/api/sync/commit", "/api/categories"):
             return self.send(404, {"error": "Not found"})
         try:
             size = int(self.headers.get("Content-Length") or 0)
             if size > 50 * 1024 * 1024:
                 return self.send(413, {"error": "Files too big (over 50 MB)"})
             body = json.loads(self.rfile.read(size) or b"{}")
+            if path == "/api/categories":
+                return self.send(200, save_categories(body))
             return self.send(200, sync(body.get("files", []), commit=path.endswith("commit")))
         except Exception as e:  # noqa: BLE001
             return self.send(400, {"error": str(e)})

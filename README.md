@@ -2,7 +2,7 @@
 
 # 📈 zerodha-portfolio-analyser
 
-**See every buy and sell you ever made, right on the price chart.**
+**See every buy and sell you ever made, right on the price chart — plus your real yearly return, your own categories, and how you did against the Nifty 50.**
 
 A small, private, local app for your Zerodha Kite portfolio.<br/>
 Drop in your tradebook → get a clean view of each stock and ETF you own.
@@ -12,7 +12,8 @@ Drop in your tradebook → get a clean view of each stock and ETF you own.
 ![Runs locally](https://img.shields.io/badge/your%20data-stays%20on%20your%20computer-2563eb)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
-<img src="docs/screenshot-dark.png" alt="Dark theme" width="49%"/> <img src="docs/screenshot-light.png" alt="Light theme" width="49%"/>
+<img src="docs/screenshot-overview.png" alt="Overview with categories" width="49%"/> <img src="docs/screenshot-light.png" alt="One stock with its trades" width="49%"/>
+<img src="docs/screenshot-category.png" alt="A category over time" width="49%"/> <img src="docs/screenshot-dark.png" alt="Dark theme" width="49%"/>
 
 <sub>Screenshots use made-up sample trades.</sub>
 
@@ -22,11 +23,20 @@ Drop in your tradebook → get a clean view of each stock and ETF you own.
 
 ## ✨ What you get
 
+- **Overview page** — invested, current value, profit or loss, and profit booked on sales, all in one place.
+- **Yearly return (XIRR)** for the whole portfolio, each category and each stock. XIRR is your gain as a yearly rate, counting *when* each rupee went in or came out.
+- **You vs the Nifty 50** — what the same money, put in and taken out on the same days, would have made in the Nifty 50 index.
+- **Your own categories** — make groups like *Gold*, *Silver*, *ETFs* or *Stocks* and put each holding in one. Each category gets a page with its combined invested amount, value and P&L, and a chart of its value over time. Until you make your own, holdings are grouped for you (stocks, gold, silver, liquid, other ETFs).
+- **Stocks by sector**, **best and worst holdings**, and **profit booked in each financial year**.
 - **One page per stock or ETF** — quantity, average buy price, invested, current value, profit or loss.
 - **Daily price chart with your trades on it** — 🟢 green dots are buys, 🔴 red dots are sells. **Bigger dot = more shares.**
 - **Click a dot → its order lights up in the table.** Click a row → its dot lights up on the chart.
 - **Zoom and drag** the chart to look at any time period.
-- **Sync in one step** — download your tradebook from Kite, drop it in. Only new trades are added. Drop the same file twice and nothing is added twice.
+- **Sync in one step** — download your tradebook from Kite, drop it in. Only new trades are added, never twice:
+  - Files whose dates overlap (say Oct–Nov, then Nov–Dec) — the shared November trades are added once.
+  - The same file dropped twice, in one go or on different days.
+  - The CSV and the Excel (`.xlsx`) download of the same trades.
+  - A file opened and saved in Excel: if Excel has cut the long trade IDs short, the app says so instead of saving bad data.
 - **Light and dark theme** — one click, and it remembers your choice.
 - **Numbers that match Kite** — average price uses *first in, first out*, the same method as Kite. Add your Kite holdings file and every quantity and average price lines up with Console.
 - **Handles the tricky bits**
@@ -70,12 +80,18 @@ flowchart LR
     H[Holdings file<br/>from Kite Console] -->|Sync| G[data/holdings.json]
     G --> E
     C[Yahoo Finance<br/>daily prices, free] -->|once a day| D[data/prices/]
+    K[Your categories] --> I[data/categories.json]
+    I --> E
     B --> E[app.py<br/>small local server]
     D --> E
     E --> F[Your browser<br/>chart + table]
 ```
 
-- **Trades** are kept in `data/trades.csv`. Each trade is matched by its trade ID, so repeats are skipped.
+- **No database.** Everything is plain files in the `data/` folder on your computer.
+- **Trades** are kept in `data/trades.csv`. A trade is known by its exchange, order ID and trade ID — the same in every file Kite gives you — so repeats are skipped. The stock name and date are left out on purpose: a stock can be renamed, and Excel can rewrite a date.
+- **Categories** are kept in `data/categories.json`: your category names and which holding is in which one.
+- **Yearly return (XIRR):** every buy is money in, every sell is money out, and what you hold now counts as sold today. It is shown once there are at least 3 months of history, because a yearly rate from a few weeks jumps around too much. Shares that were not trades (IPO, gold bonds, demerger) count as bought on the holdings file date, at Kite's average price.
+- **Nifty 50 comparison:** each buy buys Nifty 50 units on the same day, each sell sells them, and the units left are valued at today's Nifty 50.
 - **Prices** are daily closing prices from Yahoo Finance. They are saved in `data/prices/` and refreshed once a day.
 - **Profit or loss** uses *first in, first out*, like Kite: when you sell, the oldest shares you bought are sold first.
 - **Holdings file:** on the day of the file, the app takes Kite's quantity and average price as the truth. Trades after that day are added on top.
@@ -127,16 +143,14 @@ PORT=9000 python3 app.py
 ```
 app.py          the local server: reads tradebooks, gets prices, works out holdings
 web/            the page: index.html, app.js, style.css (charts by Apache ECharts)
-data/           your trades, holdings file and cached prices (created on first sync, never committed)
+data/           your trades, holdings file, categories and cached prices (created on first sync, never committed)
 docs/           screenshots
 ```
 
 ## 🛣️ Ideas for later
 
-- Whole-portfolio view: how much is in each stock, sector and ETF
-- Yearly return (XIRR) per stock and for the whole portfolio
 - Compare each stock with the Nifty 50 over the same time
-- Best and worst trades, and how long you held them
+- How long you held each share before selling
 - Dividends from the Kite Console dividend report
 
 Ideas and pull requests are welcome.
