@@ -4,11 +4,14 @@ zerodha-portfolio-analyser: a small local app for your Zerodha Kite portfolio.
 
 Run:  python3 app.py        (opens http://localhost:8000)
 
+- Each Zerodha account has its own folder: data/accounts/<client ID>/. Deleting that
+  folder deletes that account's data and nothing else.
 - Trades come from Kite Console tradebook CSV files you add with "Sync".
-  They are saved in data/trades.csv. Only new trades are added (matched by trade ID).
+  They are saved in the account's trades.csv. Only new trades are added (matched by trade ID).
 - The Kite holdings file (optional) tells the app about shares that never were trades
-  (IPO, bonus, demerger, transfers, gold bonds) and is saved in data/holdings.json.
-- Daily prices come from Yahoo Finance (free) and are cached in data/prices/ once a day.
+  (IPO, bonus, demerger, transfers, gold bonds) and is saved in the account's holdings.json.
+- Daily prices come from Yahoo Finance (free) and are cached in data/prices/ once a day,
+  shared by all accounts.
 No packages to install: only the Python standard library is used.
 """
 import base64
@@ -34,12 +37,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 DATA = Path(os.environ.get("DATA_DIR", ROOT / "data")).resolve()
-PRICES = DATA / "prices"
-TRADES = DATA / "trades.csv"
-HOLDINGS = DATA / "holdings.json"
-META = DATA / "meta.json"
-TICKERS = DATA / "tickers.json"
-CATEGORIES = DATA / "categories.json"  # your own groups, like Gold or Stocks, and which holding is in which  # optional: {"KITE_SYMBOL or ISIN": "YAHOO.TICKER"}
+PRICES = DATA / "prices"  # shared by all accounts: prices are not personal
+TICKERS = DATA / "tickers.json"  # optional, shared: {"KITE_SYMBOL or ISIN": "YAHOO.TICKER"}
+ACCOUNTS = DATA / "accounts"  # one folder per account, named by its Zerodha client ID
+# Files inside an account folder
+TRADES = "trades.csv"
+HOLDINGS = "holdings.json"
+META = "meta.json"
+CATEGORIES = "categories.json"  # your own groups, like Gold or Stocks, and which holding is in which
+ACCOUNT = "account.json"  # {"id": client ID, "name": account holder}
+CLIENT_ID = re.compile(r"^[A-Z0-9]{2,12}$")
 PORT = int(os.environ.get("PORT", "8000"))
 EPS = 1e-6
 
@@ -225,9 +232,25 @@ def parse_holdings(rows):
     return {"date": as_on or date.today().isoformat(), "items": items}
 
 
-def classify(f):
+def file_client(f, sheets):
+    """The Zerodha client ID a file belongs to, if it says: Kite's .xlsx files have a
+    "Client ID" row, and its downloads are named like tradebook-AB1234-EQ.csv."""
+    for _, rows in sheets:
+        for r in rows[:15]:
+            cells = [str(c).strip() for c in r if str(c).strip()]
+            if len(cells) >= 2 and cells[0].lower() == "client id":
+                return cells[1].upper()
+    m = re.match(r"(?:tradebook|holdings)-([A-Za-z]{2,4}[0-9]{3,7})(?:[-_.]|$)", f.get("name") or "", re.I)
+    return m.group(1).upper() if m else None
+
+
+def classify(f, account):
     """Read one uploaded file. Returns ('trades', trades, skipped) or ('holdings', snapshot)."""
     sheets = file_rows(f)
+    client = file_client(f, sheets)
+    if client and client != account:
+        raise ValueError("This file is from account %s, not %s. Pick %s in the account list "
+                         "first, or add it as a new account." % (client, account, client))
     # A holdings .xlsx has Equity, Mutual Funds and Combined sheets: only Equity is used
     sheets = [s for s in sheets if s[0] in ("csv", "Equity")] or sheets
     for name, rows in sheets:
@@ -254,38 +277,38 @@ def trade_key(t):
     return (t["exchange"].upper(), oid or tid, tid, t["trade_date"], t.get("isin") or t["symbol"])
 
 
-def load_trades():
-    if not TRADES.exists():
+def load_trades(acc):
+    if not (acc / TRADES).exists():
         return []
-    with TRADES.open(newline="") as f:
+    with (acc / TRADES).open(newline="") as f:
         return list(csv.DictReader(f))
 
 
-def save_trades(trades):
+def save_trades(acc, trades):
     trades.sort(key=lambda t: (t["trade_date"], t["order_execution_time"], t["symbol"]))
     out = io.StringIO()
     w = csv.DictWriter(out, fieldnames=FIELDS, lineterminator="\n")
     w.writeheader()
     w.writerows({k: t.get(k, "") for k in FIELDS} for t in trades)
-    write_atomic(TRADES, out.getvalue())
+    write_atomic(acc / TRADES, out.getvalue())
 
 
-def sync(files, commit):
+def sync(acc, files, commit):
     if not commit:
-        return _sync(files, False)
+        return _sync(acc, files, False)
     with lock:  # one commit at a time, from reading saved trades to writing them
-        return _sync(files, True)
+        return _sync(acc, files, True)
 
 
-def _sync(files, commit):
-    saved = load_trades()
+def _sync(acc, files, commit):
+    saved = load_trades(acc)
     keys = {trade_key(t) for t in saved}
     report = {"files": [], "new": 0, "already": 0, "repeated": 0, "skipped": 0, "symbols": [],
               "from": None, "to": None, "holdings": None}
     new, snapshot, batch = [], None, set()
     for f in files:
         try:
-            got = classify(f)
+            got = classify(f, acc.name)
         except Exception as e:  # noqa: BLE001 - shown to the user
             report["files"].append({"name": f.get("name"), "error": str(e)})
             continue
@@ -314,17 +337,17 @@ def _sync(files, commit):
     report["new"] = len(new)
     report["symbols"] = sorted({t["symbol"] for t in new})
     if snapshot:
-        old = read_json(HOLDINGS, {})
+        old = read_json(acc / HOLDINGS, {})
         report["holdings"] = {"date": snapshot["date"], "count": len(snapshot["items"]),
                               "older": bool(old.get("date") and old["date"] > snapshot["date"])}
     if commit and (new or snapshot):
         if new:
-            save_trades(saved + new)
+            save_trades(acc, saved + new)
         if snapshot and not report["holdings"]["older"]:
-            write_atomic(HOLDINGS, json.dumps(snapshot, indent=1))
-        meta = read_json(META, {})
+            write_atomic(acc / HOLDINGS, json.dumps(snapshot, indent=1))
+        meta = read_json(acc / META, {})
         meta["lastSynced"] = date.today().isoformat()
-        write_atomic(META, json.dumps(meta, indent=2))
+        write_atomic(acc / META, json.dumps(meta, indent=2))
     return report
 
 
@@ -639,9 +662,9 @@ def build_holding(key, isin, symbol, trades, px, snap_item, snap_date):
     }
 
 
-def portfolio():
-    trades = load_trades()
-    snap = read_json(HOLDINGS, None)
+def portfolio(acc):
+    trades = load_trades(acc)
+    snap = read_json(acc / HOLDINGS, None)
     snap_items = snap["items"] if snap else {}
     groups = {}
     for t in trades:
@@ -672,11 +695,12 @@ def portfolio():
     insights = make_insights(holdings, min((first_date(k) for k in keys), default=None))
     for h in holdings:
         h["autoCategory"] = asset_class(h)  # used until you put it in a category yourself
-    meta = read_json(META, {})
+    meta = read_json(acc / META, {})
     return {
+        "account": account_info(acc),
         "holdings": holdings,
         "insights": insights,
-        "categories": read_json(CATEGORIES, None),
+        "categories": read_json(acc / CATEGORIES, None),
         "tradeCount": len(trades),
         "lastSynced": meta.get("lastSynced"),
         "lastTradeDate": max((t["trade_date"] for t in trades), default=None),
@@ -757,7 +781,7 @@ def make_insights(holdings, first):
     }
 
 
-def save_categories(body):
+def save_categories(acc, body):
     """Save your categories: {"names": [...], "assign": {holding key: name}}."""
     names = body.get("names")
     assign = body.get("assign")
@@ -772,8 +796,86 @@ def save_categories(body):
         raise ValueError("Up to 50 categories.")
     assign = {str(k)[:40]: str(v) for k, v in assign.items() if str(v) in clean}
     with lock:
-        write_atomic(CATEGORIES, json.dumps({"names": clean, "assign": assign}, indent=1))
+        write_atomic(acc / CATEGORIES, json.dumps({"names": clean, "assign": assign}, indent=1))
     return {"names": clean, "assign": assign}
+
+
+# ---------- accounts (one folder each) ----------
+
+def account_info(acc):
+    info = read_json(acc / ACCOUNT, {})
+    return {"id": acc.name, "name": str(info.get("name") or acc.name)}
+
+
+def list_accounts():
+    if not ACCOUNTS.is_dir():
+        return []
+    return [account_info(d) for d in sorted(ACCOUNTS.iterdir()) if d.is_dir() and CLIENT_ID.match(d.name)]
+
+
+def account_dir(aid):
+    """The folder of an account. With no account given, the first one."""
+    if not aid:
+        accounts = list_accounts()
+        if not accounts:
+            raise LookupError("No account yet. Add one on the Sync page.")
+        aid = accounts[0]["id"]
+    aid = str(aid).upper()
+    acc = ACCOUNTS / aid
+    if not CLIENT_ID.match(aid) or not acc.is_dir():
+        raise LookupError("No account %s. It may have been deleted." % aid)
+    return acc
+
+
+def add_account(body):
+    """Add an account, or with "rename": true change the holder name of one."""
+    aid = str(body.get("id") or "").strip().upper()
+    name = " ".join(str(body.get("name") or "").split())[:60]
+    if body.get("rename"):
+        acc = account_dir(aid)
+        if not name:
+            raise ValueError("Type the account holder's name.")
+        with lock:
+            write_atomic(acc / ACCOUNT, json.dumps({"id": acc.name, "name": name}, indent=2))
+        return {"accounts": list_accounts(), "added": acc.name}
+    if not CLIENT_ID.match(aid):
+        raise ValueError("Client ID is letters and numbers only, like AB1234. Find it at the top "
+                         "right of Kite.")
+    if not name:
+        raise ValueError("Type the account holder's name.")
+    with lock:
+        acc = ACCOUNTS / aid
+        if acc.is_dir():
+            raise ValueError("Account %s is already added." % aid)
+        acc.mkdir(parents=True)
+        write_atomic(acc / ACCOUNT, json.dumps({"id": aid, "name": name}, indent=2))
+    return {"accounts": list_accounts(), "added": aid}
+
+
+def move_old_data():
+    """Before accounts, the data was right inside data/. Move it into an account folder once.
+    The client ID comes from a Kite .xlsx file saved in data/imports, if there is one."""
+    old = [n for n in (TRADES, HOLDINGS, META, CATEGORIES, "imports") if (DATA / n).exists()]
+    if not old:
+        return
+    aid = None
+    for x in sorted((DATA / "imports").glob("*.xlsx")) if (DATA / "imports").is_dir() else []:
+        try:
+            sheets = list(read_xlsx(x.read_bytes()).items())
+        except Exception:  # noqa: BLE001 - only a hint
+            continue
+        aid = file_client({"name": x.name}, sheets)
+        if aid:
+            break
+    aid = aid if aid and CLIENT_ID.match(aid) else "ACCOUNT1"
+    acc = ACCOUNTS / aid
+    acc.mkdir(parents=True, exist_ok=True)
+    for n in old:
+        if not (acc / n).exists():
+            (DATA / n).replace(acc / n)
+    if not (acc / ACCOUNT).exists():
+        write_atomic(acc / ACCOUNT, json.dumps({"id": aid, "name": aid}, indent=2))
+    print("Moved your saved data into " + str(acc))
 
 
 # ---------- web server ----------
@@ -806,10 +908,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.host_ok():
             return self.send(403, b"Forbidden", "text/plain")
-        path = urllib.parse.urlparse(self.path).path
+        url = urllib.parse.urlparse(self.path)
+        path = url.path
+        if path == "/api/accounts":
+            return self.send(200, {"accounts": list_accounts()})
         if path == "/api/portfolio":
             try:
-                return self.send(200, portfolio())
+                aid = urllib.parse.parse_qs(url.query).get("account", [""])[0]
+                return self.send(200, portfolio(account_dir(aid)))
+            except LookupError as e:
+                return self.send(404, {"error": str(e), "noAccount": True})
             except Exception as e:  # noqa: BLE001
                 return self.send(500, {"error": str(e)})
         file = (WEB / (urllib.parse.unquote(path).lstrip("/") or "index.html")).resolve()
@@ -818,25 +926,30 @@ class Handler(BaseHTTPRequestHandler):
         self.send(200, file.read_bytes(), TYPES.get(file.suffix, "application/octet-stream"))
 
     def do_POST(self):
-        path = urllib.parse.urlparse(self.path).path
+        url = urllib.parse.urlparse(self.path)
+        path = url.path
         if not self.host_ok() or not (self.headers.get("Content-Type") or "").startswith("application/json"):
             return self.send(403, {"error": "Forbidden"})
-        if path not in ("/api/sync/preview", "/api/sync/commit", "/api/categories"):
+        if path not in ("/api/sync/preview", "/api/sync/commit", "/api/categories", "/api/accounts"):
             return self.send(404, {"error": "Not found"})
         try:
             size = int(self.headers.get("Content-Length") or 0)
             if size > 50 * 1024 * 1024:
                 return self.send(413, {"error": "Files too big (over 50 MB)"})
             body = json.loads(self.rfile.read(size) or b"{}")
+            if path == "/api/accounts":
+                return self.send(200, add_account(body))
+            acc = account_dir(urllib.parse.parse_qs(url.query).get("account", [""])[0])
             if path == "/api/categories":
-                return self.send(200, save_categories(body))
-            return self.send(200, sync(body.get("files", []), commit=path.endswith("commit")))
+                return self.send(200, save_categories(acc, body))
+            return self.send(200, sync(acc, body.get("files", []), commit=path.endswith("commit")))
         except Exception as e:  # noqa: BLE001
             return self.send(400, {"error": str(e)})
 
 
 def main():
     DATA.mkdir(parents=True, exist_ok=True)
+    move_old_data()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     url = "http://localhost:%d" % PORT
     print("Portfolio running at " + url + "   (Ctrl+C to stop)")

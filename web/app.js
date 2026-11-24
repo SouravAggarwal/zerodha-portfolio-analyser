@@ -24,13 +24,28 @@
   P.todayIso = () => new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
 
   // ---------- data ----------
+  // Each Zerodha account has its own data. The one picked on the Sync page is kept in this browser.
   P.DATA = null;
+  P.ACCOUNTS = [];
+  P.account = null;
+  const NO_DATA = () => ({ holdings: [], insights: {}, categories: null, tradeCount: 0, lastSynced: null, lastTradeDate: null, holdingsDate: null });
   P.load = async () => {
-    const r = await fetch('/api/portfolio');
+    const a = await fetch('/api/accounts').then((r) => r.json());
+    P.ACCOUNTS = a.accounts || [];
+    const want = localStorage.getItem('account');
+    P.account = P.ACCOUNTS.find((x) => x.id === want) || P.ACCOUNTS[0] || null;
+    if (!P.account) return (P.DATA = NO_DATA());
+    const r = await fetch('/api/portfolio?account=' + encodeURIComponent(P.account.id));
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Could not load');
     P.DATA = d;
     return d;
+  };
+  P.useAccount = async (id) => {
+    localStorage.setItem('account', id);
+    $('#page').innerHTML = '<div class="loading">Loading this account…</div>';
+    await P.load();
+    P.render();
   };
   P.held = () => P.DATA.holdings.filter((h) => h.qty > 0);
   P.sold = () => P.DATA.holdings.filter((h) => h.qty <= 0);
@@ -340,7 +355,7 @@
 
   // ---------- sync ----------
   P.syncSteps = () => `<ol class="steps">
-      <li>Open <a href="https://console.zerodha.com/reports/tradebook" target="_blank" rel="noopener">Kite Console → Reports → Tradebook</a>.</li>
+      <li>Open <a href="https://console.zerodha.com/reports/tradebook" target="_blank" rel="noopener">Kite Console → Reports → Tradebook</a>, logged in as <b>${esc(P.account.name)} (${esc(P.account.id)})</b>.</li>
       <li>Segment <b>Equity</b>. ${P.DATA.lastTradeDate ? `Your saved trades go up to <b>${P.date(P.DATA.lastTradeDate)}</b>: pick dates from that day to today.` : 'First time: download one file per financial year.'}</li>
       <li>Click <b>View</b>, then <b>Download: CSV</b> (or XLSX).</li>
       <li>Also download your holdings from <a href="https://console.zerodha.com/portfolio/holdings" target="_blank" rel="noopener">Console → Portfolio → Holdings</a>.</li>
@@ -445,6 +460,7 @@
   // ---------- page links, theme, start ----------
   P.post = async (url, body) => {
     try {
+      if (P.account && url !== '/api/accounts') url += '?account=' + encodeURIComponent(P.account.id);
       const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       return await r.json();
     } catch (e) { return { error: e.message }; }
@@ -681,18 +697,60 @@
   function sync() {
     title('Sync trades');
     layout(null);
+    const has = !!P.account;
     $('#page').innerHTML = `<div class="sync"><div class="head"><div><h1>Sync trades</h1><div class="sub">Bring in new trades and your latest holdings from Kite.</div></div></div>
-      ${P.syncStatus()}${P.syncDrop()}<div class="card"><div class="card-head"><b>Which files to download</b></div><div class="pad">${P.syncSteps()}</div></div></div>`;
-    P.bindSync((c) => {
+      ${accountCard()}
+      ${has ? `${P.syncStatus()}${P.syncDrop()}<div class="card"><div class="card-head"><b>Which files to download</b></div><div class="pad">${P.syncSteps()}</div></div>` : ''}</div>`;
+    bindAccounts();
+    if (has) P.bindSync((c) => {
       flash = [c.new ? `Added ${P.plural(c.new, 'new trade')}.` : '', c.holdings && !c.holdings.older ? 'Saved your holdings file.' : ''].filter(Boolean).join(' ') || 'Nothing new to add.';
       location.hash = '#/';
     });
   }
 
+  // Which account: holder name, a list to switch, and a small form to add one
+  function accountCard() {
+    const form = `<div class="acct-form"><input id="acct-name" placeholder="Account holder name" maxlength="60" autocomplete="off" />
+      <input id="acct-id" placeholder="Client ID, like AB1234" maxlength="12" autocomplete="off" /><button class="btn primary" id="acct-save">Add account</button></div>
+      <small class="muted">The client ID is at the top right of Kite. Each account keeps its data in its own folder.</small><div class="err" id="acct-err"></div>`;
+    if (!P.account) return `<div class="card pad acct"><b>Add your Zerodha account</b>${form}</div>`;
+    return `<div class="card acct"><div class="acct-row">
+        <div><small class="muted">Account holder</small><div class="acct-name">${esc(P.account.name)}</div><small class="muted">Client ID ${esc(P.account.id)}</small>
+          <details class="acct-rename"><summary>Change name</summary><div class="acct-form one"><input id="acct-newname" value="${esc(P.account.name === P.account.id ? '' : P.account.name)}" placeholder="Account holder name" maxlength="60" autocomplete="off" /><button class="btn" id="acct-rename">Save</button></div><div class="err" id="acct-rename-err"></div></details></div>
+        <label class="acct-pick"><small class="muted">Account</small><select id="acct">${P.ACCOUNTS.map((a) => `<option value="${esc(a.id)}" ${a.id === P.account.id ? 'selected' : ''}>${esc(a.name)} · ${esc(a.id)}</option>`).join('')}</select></label></div>
+      <details class="acct-add"><summary>+ Add another account</summary>${form}</details></div>`;
+  }
+  function bindAccounts() {
+    const pick = $('#acct');
+    if (pick) pick.onchange = () => { editing = false; query = ''; P.useAccount(pick.value); };
+    const ren = $('#acct-rename');
+    if (ren) {
+      const rename = async () => {
+        const r = await P.post('/api/accounts', { id: P.account.id, name: $('#acct-newname').value, rename: true });
+        if (r.error) return ($('#acct-rename-err').textContent = r.error);
+        P.useAccount(r.added);
+      };
+      ren.onclick = rename;
+      $('#acct-newname').onkeydown = (e) => { if (e.key === 'Enter') rename(); };
+    }
+    const save = $('#acct-save');
+    if (!save) return;
+    const add = async () => {
+      save.disabled = true;
+      const r = await P.post('/api/accounts', { name: $('#acct-name').value, id: $('#acct-id').value });
+      save.disabled = false;
+      if (r.error) return ($('#acct-err').textContent = r.error);
+      editing = false; query = '';
+      P.useAccount(r.added);
+    };
+    save.onclick = add;
+    $('#acct-id').onkeydown = (e) => { if (e.key === 'Enter') add(); };
+  }
+
   function empty() {
     title('Portfolio');
     layout(null);
-    $('#page').innerHTML = `<div class="empty" style="min-height:60vh"><div><h2>No trades yet</h2>Download your tradebook from Kite Console and add it on the Sync page.<br/>
+    $('#page').innerHTML = `<div class="empty" style="min-height:60vh"><div><h2>${P.account ? 'No trades yet' : 'Add your account'}</h2>${P.account ? 'Download your tradebook from Kite Console and add it on the Sync page.' : 'Add your Zerodha account on the Sync page, then add its files.'}<br/>
       <a class="btn primary" href="#/sync">Go to Sync</a></div></div>`;
   }
 

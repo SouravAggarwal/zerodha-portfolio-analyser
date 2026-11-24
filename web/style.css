@@ -138,3 +138,17 @@ select { background: var(--card); border: 1px solid var(--line); border-radius: 
 }
 .rail a.mark, .rail a.mark:hover { width: 40px; height: 40px; padding: 0; display: grid; place-items: center; background: var(--accent); color: #fff; font-size: 16px; }
 @media (max-width: 900px) { .rail a.mark { display: none; } }
+/* Sync page: which account */
+.acct { display: grid; gap: 12px; }
+.acct-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 18px 20px 0; }
+.acct-name { font-size: 20px; font-weight: 700; margin: 2px 0; }
+.acct-pick { display: grid; gap: 4px; min-width: 220px; }
+.acct-pick select, .acct-form input { padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); font: inherit; min-width: 0; }
+.acct-add { padding: 0 20px 18px; } .acct-add summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+.acct-add[open] summary { margin-bottom: 10px; }
+.acct-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin: 10px 0 6px; }
+.acct .err:empty { display: none; }
+@media (max-width: 900px) { .acct-form { grid-template-columns: 1fr; } .acct-pick { min-width: 0; width: 100%; } }
+.acct-rename summary { cursor: pointer; color: var(--accent); font-size: 12px; margin-top: 4px; }
+.acct-form.one { grid-template-columns: 1fr auto; max-width: 360px; }
+.acct-rename .err:empty { display: none; }

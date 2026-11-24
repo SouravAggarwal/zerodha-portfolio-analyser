@@ -27,7 +27,7 @@ Drop in your tradebook → get a clean view of each stock and ETF you own.
   - **Home** — the whole summary: value, profit or loss, profit booked on sales, yearly return vs the Nifty 50, value over time, your categories, best and worst holdings, sectors.
   - **Holdings** — a searchable list grouped by category. The first item, **All holdings**, shows one table of everything you hold and everything you sold.
   - **Categories** — your groups. The first item, **All categories**, compares them in one chart and table.
-  - **Sync** — add new files from Kite.
+  - **Sync** — add new files from Kite, and pick which account you are looking at.
 - Every page has its own link (like `#/holdings/INFY`), so the browser Back button and bookmarks work.
 - **Yearly return (XIRR)** for the whole portfolio, each category and each stock. XIRR is your gain as a yearly rate, counting *when* each rupee went in or came out.
 - **You vs the Nifty 50** — what the same money, put in and taken out on the same days, would have made in the Nifty 50 index.
@@ -42,6 +42,7 @@ Drop in your tradebook → get a clean view of each stock and ETF you own.
   - The same file dropped twice, in one go or on different days.
   - The CSV and the Excel (`.xlsx`) download of the same trades.
   - A file opened and saved in Excel: if Excel has cut the long trade IDs short, the app says so instead of saving bad data.
+- **More than one Zerodha account** — add each account (holder name and client ID) on the Sync page and switch between them with a list there. Every account keeps its own trades, holdings file and categories in its own folder. A file from the wrong account is refused, because Kite's files carry the client ID.
 - **Light and dark theme** — one click, and it remembers your choice.
 - **Numbers that match Kite** — average price uses *first in, first out*, the same method as Kite. Add your Kite holdings file and every quantity and average price lines up with Console.
 - **Handles the tricky bits**
@@ -61,7 +62,7 @@ cd zerodha-portfolio-analyser
 python3 app.py
 ```
 
-Your browser opens at **http://localhost:8000**. Open **Sync** in the left menu to add your first file.
+Your browser opens at **http://localhost:8000**. Open **Sync** in the left menu, add your account (name and client ID), then add your first file.
 
 ## 📥 Which file to download from Kite
 
@@ -81,11 +82,11 @@ Your browser opens at **http://localhost:8000**. Open **Sync** in the left menu 
 
 ```mermaid
 flowchart LR
-    A[Tradebook CSV<br/>from Kite Console] -->|Sync| B[data/trades.csv<br/>on your computer]
-    H[Holdings file<br/>from Kite Console] -->|Sync| G[data/holdings.json]
+    A[Tradebook CSV<br/>from Kite Console] -->|Sync| B[trades.csv<br/>in the account's folder]
+    H[Holdings file<br/>from Kite Console] -->|Sync| G[holdings.json]
     G --> E
     C[Yahoo Finance<br/>daily prices, free] -->|once a day| D[data/prices/]
-    K[Your categories] --> I[data/categories.json]
+    K[Your categories] --> I[categories.json]
     I --> E
     B --> E[app.py<br/>small local server]
     D --> E
@@ -93,8 +94,9 @@ flowchart LR
 ```
 
 - **No database.** Everything is plain files in the `data/` folder on your computer.
-- **Trades** are kept in `data/trades.csv`. A trade is known by its exchange, order ID and trade ID — the same in every file Kite gives you — so repeats are skipped. The stock name and date are left out on purpose: a stock can be renamed, and Excel can rewrite a date.
-- **Categories** are kept in `data/categories.json`: your category names and which holding is in which one.
+- **One folder per account:** `data/accounts/<client ID>/` holds that account's trades, holdings file, categories and name. **Delete the folder and that account is gone**, nothing else changes. Daily prices in `data/prices/` are shared, since they are not personal.
+- **Trades** are kept in the account's `trades.csv`. A trade is known by its exchange, order ID and trade ID — the same in every file Kite gives you — so repeats are skipped. The stock name and date are left out on purpose: a stock can be renamed, and Excel can rewrite a date.
+- **Categories** are kept in the account's `categories.json`: your category names and which holding is in which one.
 - **Yearly return (XIRR):** every buy is money in, every sell is money out, and what you hold now counts as sold today. It is shown once there are at least 3 months of history, because a yearly rate from a few weeks jumps around too much. Shares that were not trades (IPO, gold bonds, demerger) count as bought on the holdings file date, at Kite's average price.
 - **Nifty 50 comparison:** each buy buys Nifty 50 units on the same day, each sell sells them, and the units left are valued at today's Nifty 50.
 - **Prices** are daily closing prices from Yahoo Finance. They are saved in `data/prices/` and refreshed once a day.
@@ -148,7 +150,7 @@ PORT=9000 python3 app.py
 ```
 app.py          the local server: reads tradebooks, gets prices, works out holdings
 web/            the page: index.html, app.js, style.css (charts by Apache ECharts)
-data/           your trades, holdings file, categories and cached prices (created on first sync, never committed)
+data/           one folder per account (trades, holdings file, categories) and cached prices; never committed
 docs/           screenshots
 ```
 
